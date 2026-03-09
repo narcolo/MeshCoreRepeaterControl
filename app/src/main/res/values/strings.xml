@@ -1,0 +1,29 @@
+<resources>
+    <string name="app_name">MeshCore Discovery</string>
+    <string name="connect">Connect</string>
+    <string name="stop_scan">Stop Scan</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="discover_repeaters">Discover Repeaters</string>
+    <string name="scanning">Scanning\u2026</string>
+    <string name="discovering">Discovering\u2026</string>
+    <string name="help_text">Scan for a MeshCore companion device via Bluetooth to begin discovery</string>
+    <string name="scanning_help_text">Tap a device to connect</string>
+    <string name="connected_to">Connected to %s</string>
+    <string name="status_connecting">Connecting\u2026</string>
+    <string name="discovery_results">Discovery Results</string>
+    <string name="found_nodes">Found %d node(s)</string>
+    <string name="no_nodes_found">No nodes found</string>
+    <string name="listening_countdown">Listening\u2026 %ds remaining</string>
+    <string name="sending_zero_hop">Starting discovery\u2026</string>
+    <string name="sent_to_discovery">Sent to #discovery (channel %d)</string>
+    <string name="auto_sending">Sending to #discovery\u2026</string>
+    <string name="no_gps">GPS not available yet</string>
+    <string name="auto_discover">Auto-Discover</string>
+    <string name="stop_auto_discover">Stop Auto-Discover</string>
+    <string name="auto_discover_title">Auto-Discover Interval</string>
+    <string name="next_discovery_in">Next discovery in %d:%02d</string>
+    <string name="auto_discovery_active">Auto-discovery active (%d min interval)</string>
+    <string name="sending_message">Sending message %d of %d\u2026</string>
+    <string name="retrying_message">Retrying\u2026 (attempt %d/3)</string>
+    <string name="messages_deferred">%d message(s) will retry next cycle</string>
+</resources>
