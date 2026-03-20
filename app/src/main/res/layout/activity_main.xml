@@ -24,6 +24,8 @@
             android:textColor="?android:attr/textColorPrimary"
             android:layout_marginBottom="32dp" />
 
+
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_connect"
             android:layout_width="wrap_content"
@@ -45,6 +47,16 @@
             android:layout_marginTop="24dp"
             android:paddingStart="16dp"
             android:paddingEnd="16dp" />
+
+        <TextView
+            android:id="@+id/overall_stats_disconnected"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="13sp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:gravity="center"
+            android:layout_marginTop="24dp"
+            android:visibility="gone" />
 
     </LinearLayout>
 
@@ -160,6 +172,16 @@
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_marginTop="16dp" />
 
+        <TextView
+            android:id="@+id/overall_stats_connected"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="13sp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:gravity="center"
+            android:layout_marginTop="16dp"
+            android:visibility="gone" />
+
     </LinearLayout>
 
     <!-- STATE: DISCOVERING -->
@@ -227,6 +249,16 @@
             android:paddingBottom="4dp" />
 
         <TextView
+            android:id="@+id/session_stats"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="14sp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:gravity="center"
+            android:paddingBottom="4dp"
+            android:visibility="gone" />
+
+        <TextView
             android:id="@+id/results_status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -284,5 +316,16 @@
             android:layout_marginTop="4dp" />
 
     </LinearLayout>
+
+    <!-- Global menu button (overlays top-right corner) -->
+    <ImageButton
+        android:id="@+id/btn_menu"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="8dp"
+        android:src="@drawable/ic_more_vert"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/stats_menu" />
 
 </FrameLayout>

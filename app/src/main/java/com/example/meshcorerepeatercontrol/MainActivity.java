@@ -9,8 +9,10 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import android.Manifest;
+import android.app.NotificationManager;
 import android.bluetooth.BluetoothAdapter;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -20,10 +22,13 @@ import android.os.Looper;
 import android.util.Log;
 import android.view.View;
 import android.widget.ArrayAdapter;
+import android.widget.ImageButton;
 import android.widget.ProgressBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import com.example.meshcorerepeatercontrol.service.AutoDiscoverService;
 
 import com.example.meshcorerepeatercontrol.bluetooth.BleDevice;
 import com.example.meshcorerepeatercontrol.bluetooth.BleDeviceAdapter;
@@ -32,6 +37,8 @@ import com.example.meshcorerepeatercontrol.model.DiscoveredRepeater;
 import com.example.meshcorerepeatercontrol.protocol.MeshCoreProtocol;
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.Priority;
+import com.google.android.gms.tasks.CancellationTokenSource;
 import com.google.android.material.button.MaterialButton;
 
 import java.nio.charset.StandardCharsets;
@@ -45,6 +52,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final int REQUEST_ENABLE_BT = 1;
     private static final int REQUEST_PERMISSIONS = 2;
+    private static final int REQUEST_NOTIFICATION_PERMISSION = 3;
     private static final long DISCOVERY_DURATION_MS = 20000;
 
     private enum AppState { DISCONNECTED, SCANNING, CONNECTED, DISCOVERING, RESULTS }
@@ -96,6 +104,10 @@ public class MainActivity extends AppCompatActivity {
     // Results state views
     private TextView resultsStatus;
 
+    // Overall stats views (disconnected + connected screens)
+    private TextView overallStatsDisconnected;
+    private TextView overallStatsConnected;
+
     // Reliable message delivery
     private final List<String> pendingMessages = new ArrayList<>();
     private final List<String> deferredMessages = new ArrayList<>();
@@ -124,6 +136,11 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     };
+
+    // Session stats
+    private int sessionSuccessCount = 0;
+    private int sessionFailCount = 0;
+    private TextView sessionStatsText;
 
     // Auto-discover
     private boolean autoDiscoverActive = false;
@@ -160,6 +177,7 @@ public class MainActivity extends AppCompatActivity {
         // Disconnected state
         MaterialButton btnConnect = findViewById(R.id.btn_connect);
         btnConnect.setOnClickListener(v -> startScan());
+        overallStatsDisconnected = findViewById(R.id.overall_stats_disconnected);
 
         // Scanning state
         RecyclerView devicesRecycler = findViewById(R.id.devices_recycler_view);
@@ -175,6 +193,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
         // Connected state
+        overallStatsConnected = findViewById(R.id.overall_stats_connected);
         MaterialButton btnDiscover = findViewById(R.id.btn_discover);
         btnDiscover.setOnClickListener(v -> startDiscovery());
 
@@ -196,7 +215,11 @@ public class MainActivity extends AppCompatActivity {
         resultsRecycler.setAdapter(discoveredAdapter);
 
         resultsStatus = findViewById(R.id.results_status);
+        sessionStatsText = findViewById(R.id.session_stats);
         autoDiscoverStatusText = findViewById(R.id.auto_discover_status);
+
+        ImageButton btnMenu = findViewById(R.id.btn_menu);
+        btnMenu.setOnClickListener(v -> showStatsDialog());
 
         btnDiscoverAgain = findViewById(R.id.btn_discover_again);
         btnDiscoverAgain.setOnClickListener(v -> startDiscovery());
@@ -223,6 +246,10 @@ public class MainActivity extends AppCompatActivity {
         stateConnected.setVisibility(state == AppState.CONNECTED ? View.VISIBLE : View.GONE);
         stateDiscovering.setVisibility(state == AppState.DISCOVERING ? View.VISIBLE : View.GONE);
         stateResults.setVisibility(state == AppState.RESULTS ? View.VISIBLE : View.GONE);
+
+        if (state == AppState.DISCONNECTED || state == AppState.CONNECTED) {
+            refreshOverallStats();
+        }
     }
 
     // --- Permissions ---
@@ -276,6 +303,14 @@ public class MainActivity extends AppCompatActivity {
                         .setPositiveButton("OK", (dialog, which) -> checkPermissions())
                         .setNegativeButton("Cancel", null)
                         .show();
+            }
+        } else if (requestCode == REQUEST_NOTIFICATION_PERMISSION) {
+            // Proceed with auto-discover regardless of permission result
+            // (notification just won't show if denied)
+            if (pendingAutoDiscoverMinutes > 0) {
+                int minutes = pendingAutoDiscoverMinutes;
+                pendingAutoDiscoverMinutes = 0;
+                startAutoDiscover(minutes);
             }
         }
     }
@@ -506,20 +541,31 @@ public class MainActivity extends AppCompatActivity {
     // --- GPS ---
 
     private void fetchLocation() {
+        fetchLocation(null);
+    }
+
+    private void fetchLocation(Runnable onComplete) {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) {
+            if (onComplete != null) onComplete.run();
             return;
         }
-        fusedLocationClient.getLastLocation().addOnSuccessListener(this, location -> {
-            if (location != null) {
-                currentLat = location.getLatitude();
-                currentLon = location.getLongitude();
-                hasGps = true;
-                Log.d(TAG, String.format("GPS: %.6f, %.6f", currentLat, currentLon));
-            } else {
-                Log.d(TAG, "GPS: No location available");
-            }
-        }).addOnFailureListener(e -> Log.e(TAG, "Location fetch failed", e));
+        CancellationTokenSource cts = new CancellationTokenSource();
+        fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.getToken())
+            .addOnSuccessListener(this, location -> {
+                if (location != null) {
+                    currentLat = location.getLatitude();
+                    currentLon = location.getLongitude();
+                    hasGps = true;
+                    Log.d(TAG, String.format("GPS: %.6f, %.6f", currentLat, currentLon));
+                } else {
+                    Log.d(TAG, "GPS: No fresh location available");
+                }
+                if (onComplete != null) onComplete.run();
+            }).addOnFailureListener(e -> {
+                Log.e(TAG, "Location fetch failed", e);
+                if (onComplete != null) onComplete.run();
+            });
     }
 
     // --- Discovery ---
@@ -530,14 +576,6 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // Refresh GPS before every discovery
-        fetchLocation();
-
-        if (!hasGps) {
-            Toast.makeText(this, R.string.no_gps, Toast.LENGTH_SHORT).show();
-            return;
-        }
-
         discoveredAdapter.clear();
         setState(AppState.DISCOVERING);
 
@@ -545,16 +583,31 @@ public class MainActivity extends AppCompatActivity {
         countdownText.setText(getString(R.string.sending_zero_hop));
         liveNodeCount.setText("");
 
-        // Set GPS then send CONTROL DISCOVER_REQ (0x37)
-        // Stagger BLE writes to avoid overlapping GATT operations
-        protocol.sendSetAdvertLatLon(currentLat, currentLon);
-        discoveryProgress.postDelayed(() -> {
+        // Refresh GPS and wait for result before starting discovery
+        fetchLocation(() -> {
             if (currentState != AppState.DISCOVERING || protocol == null) return;
-            // filter 0xFF = all node types
-            discoveryTag = protocol.sendNodeDiscoverReq(0xFF);
-            Log.d(TAG, "Discovery started, tag=" + String.format("%08X", discoveryTag));
-        }, 300);
 
+            if (!hasGps) {
+                Toast.makeText(this, R.string.no_gps, Toast.LENGTH_SHORT).show();
+                setState(AppState.CONNECTED);
+                return;
+            }
+
+            // Set GPS then send CONTROL DISCOVER_REQ (0x37)
+            // Stagger BLE writes to avoid overlapping GATT operations
+            protocol.sendSetAdvertLatLon(currentLat, currentLon);
+            discoveryProgress.postDelayed(() -> {
+                if (currentState != AppState.DISCOVERING || protocol == null) return;
+                // filter 0xFF = all node types
+                discoveryTag = protocol.sendNodeDiscoverReq(0xFF);
+                Log.d(TAG, "Discovery started, tag=" + String.format("%08X", discoveryTag));
+            }, 300);
+
+            startDiscoveryCountdown();
+        });
+    }
+
+    private void startDiscoveryCountdown() {
         countDownTimer = new CountDownTimer(DISCOVERY_DURATION_MS, 500) {
             @Override
             public void onTick(long millisUntilFinished) {
@@ -575,7 +628,13 @@ public class MainActivity extends AppCompatActivity {
         setState(AppState.RESULTS);
 
         int count = discoveredAdapter.getItemCount();
+
+        // Update session and persistent stats
+        SharedPreferences prefs = getSharedPreferences("discovery_stats", MODE_PRIVATE);
         if (count > 0) {
+            sessionSuccessCount++;
+            prefs.edit().putInt("total_success", prefs.getInt("total_success", 0) + 1).apply();
+
             String status = getString(R.string.found_nodes, count);
             if (!deferredMessages.isEmpty()) {
                 status += " (" + getString(R.string.messages_deferred, deferredMessages.size()) + ")";
@@ -583,7 +642,18 @@ public class MainActivity extends AppCompatActivity {
             resultsStatus.setText(status);
             sendToDiscoveryChannel();
         } else {
+            sessionFailCount++;
+            prefs.edit().putInt("total_fail", prefs.getInt("total_fail", 0) + 1).apply();
+
             resultsStatus.setText(R.string.no_nodes_found);
+        }
+
+        // Show session stats only during auto-discover
+        if (autoDiscoverActive) {
+            sessionStatsText.setText(getString(R.string.session_stats, sessionSuccessCount, sessionFailCount));
+            sessionStatsText.setVisibility(View.VISIBLE);
+        } else {
+            sessionStatsText.setVisibility(View.GONE);
         }
 
         // Update button visibility for auto-discover mode
@@ -766,12 +836,12 @@ public class MainActivity extends AppCompatActivity {
     // --- Auto-Discover ---
 
     private void showAutoDiscoverDialog() {
-        final int[] intervals = {3, 5, 10, 15, 30, 60};
-        String[] labels = {"3 minutes", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "60 minutes"};
+        final int[] intervals = {1, 3, 5, 10, 15, 30, 60};
+        String[] labels = {"1 minute", "3 minutes", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "60 minutes"};
 
         Spinner spinner = new Spinner(this);
         spinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels));
-        spinner.setSelection(1); // default to 5 minutes
+        spinner.setSelection(2); // default to 5 minutes
         spinner.setPadding(48, 24, 48, 24);
 
         new AlertDialog.Builder(this)
@@ -785,9 +855,30 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
+    private int pendingAutoDiscoverMinutes = 0;
+
     private void startAutoDiscover(int minutes) {
+        // Request notification permission on Android 13+ before starting service
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                        != PackageManager.PERMISSION_GRANTED) {
+            pendingAutoDiscoverMinutes = minutes;
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                    REQUEST_NOTIFICATION_PERMISSION);
+            return;
+        }
+
         autoDiscoverActive = true;
         autoDiscoverIntervalMs = minutes * 60000;
+        sessionSuccessCount = 0;
+        sessionFailCount = 0;
+
+        // Start foreground service to keep process alive with screen off
+        Intent serviceIntent = new Intent(this, AutoDiscoverService.class);
+        serviceIntent.putExtra("content_text", getString(R.string.notification_text));
+        ContextCompat.startForegroundService(this, serviceIntent);
+
         startDiscovery();
     }
 
@@ -805,12 +896,16 @@ public class MainActivity extends AppCompatActivity {
                 int totalSeconds = (int) (millisUntilFinished / 1000);
                 int minutes = totalSeconds / 60;
                 int seconds = totalSeconds % 60;
-                autoDiscoverStatusText.setText(getString(R.string.next_discovery_in, minutes, seconds));
+                String text = getString(R.string.next_discovery_in, minutes, seconds);
+                autoDiscoverStatusText.setText(text);
+                updateServiceNotification(text);
             }
 
             @Override
             public void onFinish() {
-                autoDiscoverStatusText.setText(getString(R.string.auto_discovery_active, autoDiscoverIntervalMs / 60000));
+                String text = getString(R.string.auto_discovery_active, autoDiscoverIntervalMs / 60000);
+                autoDiscoverStatusText.setText(text);
+                updateServiceNotification(getString(R.string.discovering));
             }
         }.start();
     }
@@ -822,12 +917,58 @@ public class MainActivity extends AppCompatActivity {
             autoDiscoverCountdown.cancel();
             autoDiscoverCountdown = null;
         }
+
+        // Stop foreground service
+        stopService(new Intent(this, AutoDiscoverService.class));
+
         // Restore normal button visibility if in RESULTS state
         if (currentState == AppState.RESULTS) {
             btnDiscoverAgain.setVisibility(View.VISIBLE);
             btnStopAuto.setVisibility(View.GONE);
             autoDiscoverStatusText.setVisibility(View.GONE);
+            sessionStatsText.setVisibility(View.GONE);
         }
+    }
+
+    private void updateServiceNotification(String text) {
+        Intent intent = new Intent(this, AutoDiscoverService.class);
+        intent.putExtra("content_text", text);
+        ContextCompat.startForegroundService(this, intent);
+    }
+
+    // --- Stats ---
+
+    private void refreshOverallStats() {
+        SharedPreferences prefs = getSharedPreferences("discovery_stats", MODE_PRIVATE);
+        int totalSuccess = prefs.getInt("total_success", 0);
+        int totalFail = prefs.getInt("total_fail", 0);
+        if (totalSuccess + totalFail > 0) {
+            String text = getString(R.string.overall_stats, totalSuccess, totalFail);
+            overallStatsDisconnected.setText(text);
+            overallStatsDisconnected.setVisibility(View.VISIBLE);
+            overallStatsConnected.setText(text);
+            overallStatsConnected.setVisibility(View.VISIBLE);
+        } else {
+            overallStatsDisconnected.setVisibility(View.GONE);
+            overallStatsConnected.setVisibility(View.GONE);
+        }
+    }
+
+    private void showStatsDialog() {
+        SharedPreferences prefs = getSharedPreferences("discovery_stats", MODE_PRIVATE);
+        int totalSuccess = prefs.getInt("total_success", 0);
+        int totalFail = prefs.getInt("total_fail", 0);
+        int totalAll = totalSuccess + totalFail;
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.stats_title)
+                .setMessage(getString(R.string.stats_message, totalSuccess, totalFail, totalAll))
+                .setPositiveButton(android.R.string.ok, null)
+                .setNeutralButton(R.string.stats_reset, (dialog, which) -> {
+                    prefs.edit().clear().apply();
+                    Toast.makeText(this, "Stats reset", Toast.LENGTH_SHORT).show();
+                })
+                .show();
     }
 
     // --- Distance calculation ---

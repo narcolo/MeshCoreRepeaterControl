@@ -112,12 +112,49 @@ public class BleManager {
         }
     }
 
+    private boolean connectionEstablished = false;
+    private static final long CONNECTION_TIMEOUT_MS = 10000;
+    private Runnable connectionTimeoutRunnable;
+
     public void connect(BleDevice device, BleConnectionCallback callback) {
         this.connectionCallback = callback;
+        this.connectionEstablished = false;
+
+        // Connection timeout
+        connectionTimeoutRunnable = () -> {
+            if (!connectionEstablished && connectionCallback != null) {
+                Log.w(TAG, "Connection timeout");
+                if (bluetoothGatt != null) {
+                    bluetoothGatt.disconnect();
+                    bluetoothGatt.close();
+                    bluetoothGatt = null;
+                }
+                connectionCallback.onConnectionFailed("Connection timed out");
+                connectionCallback = null;
+            }
+        };
+        handler.postDelayed(connectionTimeoutRunnable, CONNECTION_TIMEOUT_MS);
 
         BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
             @Override
             public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+                if (status != BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    Log.e(TAG, "GATT connection failed, status=" + status);
+                    handler.removeCallbacks(connectionTimeoutRunnable);
+                    gatt.close();
+                    handler.post(() -> {
+                        if (connectionCallback != null) {
+                            if (!connectionEstablished) {
+                                connectionCallback.onConnectionFailed("Connection failed (GATT error " + status + ")");
+                                connectionCallback = null;
+                            } else {
+                                connectionCallback.onDisconnected();
+                            }
+                        }
+                    });
+                    return;
+                }
+
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     Log.i(TAG, "Connected to GATT server.");
                     bluetoothGatt = gatt;
@@ -126,6 +163,7 @@ public class BleManager {
                     handler.postDelayed(() -> gatt.discoverServices(), 600);
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     Log.i(TAG, "Disconnected from GATT server.");
+                    handler.removeCallbacks(connectionTimeoutRunnable);
                     handler.post(() -> {
                         if (connectionCallback != null) {
                             connectionCallback.onDisconnected();
@@ -202,6 +240,8 @@ public class BleManager {
                 if (CLIENT_CHARACTERISTIC_CONFIG.equals(descriptor.getUuid())) {
                     if (status == BluetoothGatt.GATT_SUCCESS) {
                         Log.i(TAG, "Notifications enabled successfully");
+                        connectionEstablished = true;
+                        handler.removeCallbacks(connectionTimeoutRunnable);
                         handler.post(() -> {
                             if (connectionCallback != null) {
                                 connectionCallback.onConnected();
@@ -250,6 +290,9 @@ public class BleManager {
     }
 
     public void disconnect() {
+        if (connectionTimeoutRunnable != null) {
+            handler.removeCallbacks(connectionTimeoutRunnable);
+        }
         if (bluetoothGatt != null) {
             bluetoothGatt.disconnect();
             bluetoothGatt.close();

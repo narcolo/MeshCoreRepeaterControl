@@ -26,4 +26,13 @@
     <string name="sending_message">Sending message %d of %d\u2026</string>
     <string name="retrying_message">Retrying\u2026 (attempt %d/3)</string>
     <string name="messages_deferred">%d message(s) will retry next cycle</string>
+    <string name="session_stats">Session: %d successful, %d failed</string>
+    <string name="overall_stats">Overall: %d successful, %d failed</string>
+    <string name="stats_title">Discovery Stats</string>
+    <string name="stats_message">Total successful: %d\nTotal failed: %d\nTotal discoveries: %d</string>
+    <string name="stats_reset">Reset</string>
+    <string name="stats_menu">Stats</string>
+    <string name="notification_title">Auto-Discover Active</string>
+    <string name="notification_text">Running auto-discovery\u2026</string>
+    <string name="notification_channel_name">Auto-Discover</string>
 </resources>

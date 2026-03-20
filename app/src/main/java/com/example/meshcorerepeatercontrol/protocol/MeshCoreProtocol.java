@@ -124,7 +124,9 @@ public class MeshCoreProtocol {
 
             case MeshCoreCommand.RESP_OK:
                 Log.d(TAG, "Command acknowledged (RESP_OK)");
-                // Generic acknowledgment - no specific action needed
+                if (protocolCallback != null) {
+                    protocolCallback.onMessageSent();
+                }
                 break;
 
             case MeshCoreCommand.RESP_SENT:

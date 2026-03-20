@@ -1,96 +1,58 @@
-# MeshCore Repeater Control
+# MeshCore Discovery
 
-An Android application for monitoring MeshCore repeater telemetry via Bluetooth LE companions.
+An Android app that discovers nearby MeshCore mesh network nodes via a Bluetooth LE companion radio and shares results over a `#discovery` channel.
+
+## How It Works
+
+```
+Android App  →  BLE  →  Companion Radio  →  LoRa  →  MeshCore Nodes
+                              ↓
+                     Discovery responses
+```
+
+The app connects to a MeshCore companion device (any device with a `MeshCore-` or `Whisper-` BLE name prefix), sends a zero-hop node discovery request over LoRa, and listens for 20 seconds. Discovered nodes are displayed with signal quality (SNR), node type, name (resolved from contacts), coordinates, and distance from your location.
+
+Results are automatically formatted as compact CSV messages and sent to a `#discovery` channel. If the channel doesn't exist, the app creates it with a SHA-256-derived PSK.
 
 ## Features
 
-- **Bluetooth LE Scanning**: Discover and connect to MeshCore companion devices
-- **Repeater Management**: Add and manage multiple repeaters with secure password storage
-- **Real-time Telemetry**: Monitor repeater metrics including:
-  - Battery percentage and voltage
-  - Temperature
-  - Signal quality (RSSI, SNR, Noise Floor)
-  - Additional sensor data via Cayenne LPP format
-- **Secure Storage**: Encrypted local storage for repeater passwords using Android EncryptedSharedPreferences
-
-## Architecture
-
-```
-Android App → Bluetooth LE → Companion Radio → LoRa → MeshCore Repeaters
-```
-
-### Key Components
-
-1. **BLE Manager** (`bluetooth/`)
-   - Handles Bluetooth scanning and connection
-   - Manages GATT characteristics for data exchange
-
-2. **MeshCore Protocol** (`protocol/`)
-   - Implements MeshCore Companion Radio Protocol
-   - Command encoding/decoding
-   - Telemetry request handling
-
-3. **Cayenne LPP Decoder** (`protocol/CayenneLppDecoder.java`)
-   - Decodes sensor data from telemetry responses
-   - Supports standard LPP types plus custom MeshCore types
-
-4. **Secure Storage** (`storage/SecureStorage.java`)
-   - AES-256 encrypted password storage
-   - Repeater configuration management
-
-5. **UI Components**
-   - `MainActivity`: BLE scanning and companion connection
-   - `TelemetryActivity`: Real-time telemetry dashboard
+- **BLE Scanning** — discover and connect to MeshCore companion devices
+- **Node Discovery** — find nearby repeaters, clients, room servers, and sensors via LoRa
+- **GPS Integration** — refreshes location before each discovery run; computes distance to nodes with known coordinates
+- **Auto-Discover** — configurable repeat interval (1/3/5/10/15/30/60 minutes) with foreground service to keep running with screen off
+- **Reliable Send** — messages sent with 3-second timeout, up to 3 retries, and deferred delivery on failure
+- **Discovery Stats** — tracks successful/failed discovery runs per session and overall
 
 ## Usage
 
-### 1. Connect to Companion
+1. Launch the app and grant Bluetooth + Location permissions
+2. Tap **Connect** to scan for companion devices
+3. Select your companion from the list
+4. Tap **Discover Repeaters** for a single discovery run, or **Auto-Discover** for recurring runs at a chosen interval
+5. Results appear as a list showing node name, type, SNR, coordinates, and distance
+6. Results are automatically sent to the `#discovery` channel
 
-1. Launch the app
-2. Grant Bluetooth permissions
-3. Tap "Scan for Companions"
-4. Select your MeshCore companion device from the list
+## CSV Message Format
 
-### 2. Add Repeater
+Each message sent to `#discovery` (max 140 bytes):
 
-1. After connection, tap "Add New Repeater"
-2. Enter:
-   - **Repeater Name**: Friendly name for identification
-   - **Public Key Prefix**: First 12 hex characters of repeater's public key (e.g., `A1B2C3D4E5F6`)
-   - **Password**: Repeater authentication password
-3. Tap "Add"
+```
+lat,lon,timestamp|PKPK:snrIn/rLat,rLon|PKPK:snrIn/0,0|...
+```
 
-### 3. View Telemetry
+- `lat,lon` — your GPS coordinates (4 decimal places)
+- `timestamp` — Unix epoch seconds
+- `PKPK` — first 2 bytes of node public key (4 hex chars)
+- `snrIn` — inbound SNR (1 decimal place)
+- `rLat,rLon` — node coordinates if known, otherwise `0,0`
 
-- The telemetry dashboard will open automatically
-- Tap "Refresh Telemetry" to request updated data
-- Data updates in real-time when received
-
-## MeshCore Protocol Implementation
-
-The app implements the MeshCore Companion Radio Protocol for BLE communication:
-
-- **Frame Format**: `[Command Code:1 byte][Data:n bytes]`
-- **Commands Used**:
-  - `CMD_APP_START (0x01)`: Initial handshake
-  - `CMD_SEND_TELEMETRY_REQ (0x27)`: Request telemetry from repeater
-- **Responses**:
-  - `PUSH_TELEMETRY_RESPONSE (0x8B)`: Telemetry data in Cayenne LPP format
-
-## Telemetry Data Format
-
-Telemetry responses contain Cayenne Low Power Payload (LPP) encoded sensor data:
-
-- Each sensor: `[Channel:1byte][Type:1byte][Data:n bytes]`
-- Temperature: 2 bytes, 0.1°C resolution
-- Battery/Voltage: 2 bytes, 0.01V resolution
-- RSSI, SNR, Noise Floor: Custom MeshCore types
+If results exceed 140 bytes, they are split across multiple messages with the same header.
 
 ## Requirements
 
 - Android 7.0 (API 24) or higher
-- Bluetooth LE support
-- Bluetooth permissions (granted at runtime)
+- Bluetooth LE hardware
+- A MeshCore companion radio device
 
 ## Build
 
@@ -98,17 +60,26 @@ Telemetry responses contain Cayenne Low Power Payload (LPP) encoded sensor data:
 ./gradlew assembleDebug
 ```
 
+Install on a connected device:
+
+```bash
+./gradlew installDebug
+```
+
 ## Permissions
 
-- `BLUETOOTH_SCAN` (Android 12+)
-- `BLUETOOTH_CONNECT` (Android 12+)
-- `ACCESS_FINE_LOCATION` (Android 11 and below)
+| Permission | Purpose |
+|---|---|
+| `BLUETOOTH_SCAN` | Discover BLE devices (Android 12+) |
+| `BLUETOOTH_CONNECT` | Connect to companion (Android 12+) |
+| `ACCESS_FINE_LOCATION` | GPS for discovery coordinates |
+| `FOREGROUND_SERVICE` | Keep auto-discover running with screen off |
+| `POST_NOTIFICATIONS` | Show auto-discover status notification (Android 13+) |
 
 ## References
 
-- [MeshCore GitHub](https://github.com/meshcore-dev/MeshCore)
-- [Companion Radio Protocol](https://github.com/meshcore-dev/MeshCore/wiki/Companion-Radio-Protocol)
-- [Cayenne LPP Specification](https://docs.mydevices.com/docs/lorawan/cayenne-lpp)
+- [MeshCore](https://github.com/ripplebiz/MeshCore)
+- [Companion Radio Protocol](https://github.com/ripplebiz/MeshCore/wiki/Companion-Radio-Protocol)
 
 ## License
 
